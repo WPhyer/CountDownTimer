@@ -27,6 +27,7 @@
 #define TIME_FORMAT_NULL_POS 23
 #define DATE_FORMAT_NULL_POS 11
 #define MARQUEE_MAX_LENGTH  100
+#define MAX_DISPLAY_LEVEL     6
 
 volatile int xpos = SCREEN_WIDTH - 1;
 volatile bool isInterrupted = false;
@@ -36,7 +37,7 @@ const DateTime TargetDateTime = DateTime(2030, 10, 25, 17, 0, 0); // 25-Oct-2030
 const uint8_t daysInMonth[] PROGMEM = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 static char marquee[MARQUEE_MAX_LENGTH];
 
-int displayFormat     = 0;
+byte displayFormat    = 0;
 int buttonState       = LOW;
 int lastButtonState   = LOW;
 long lastDebounceTime = 0;
@@ -82,7 +83,7 @@ void loop() {
   TimeSpan duration = TimeSpan(TargetDateTime - curDateTime);
   DateTimeSpan timeSpan = CompareDates(curDateTime, TargetDateTime, duration);
 
-  showMarquee(curDateTime, duration, timeSpan);
+  showMarquee(duration, timeSpan);
   showCurrentTime(curDateTime, duration);
   
   display.display();
@@ -105,7 +106,7 @@ void marquee_ISR()
   }
 }
 
-void showMarquee(DateTime curDateTime, TimeSpan duration, DateTimeSpan timeSpan)
+void showMarquee(TimeSpan duration, DateTimeSpan timeSpan)
 {
   int x1;
   int y1;
@@ -121,35 +122,60 @@ void showMarquee(DateTime curDateTime, TimeSpan duration, DateTimeSpan timeSpan)
   {
     case 0:
       tmpPtr += itoa(timeSpan.Years, tmpPtr);
-      copyString(tmpPtr, timeSpan.Years == 1 ? " Year" : " Years");
+      setDurationText(tmpPtr, displayFormat, timeSpan.Years == 1);
       break;
   
     case 1:
       months = (timeSpan.Years * 12) + timeSpan.Months;
       tmpPtr += itoa(months, tmpPtr);
-      copyString(tmpPtr, months == 1 ? " Month" : " Months");
+      setDurationText(tmpPtr, displayFormat, months == 1);
       break;
 
     case 2:
       tmpPtr += itoa(duration.days(), tmpPtr);
-      copyString(tmpPtr, duration.days() == 1 ? " Day" : " Days");
+      setDurationText(tmpPtr, displayFormat, duration.days() == 1);
       break;
     
     case 3:
       totalHours = (int32_t)((duration.totalseconds() / 60L) / 60L);
       tmpPtr += itoa(totalHours, tmpPtr);
-      copyString(tmpPtr, totalHours == 1 ? " Hour" : " Hours");
+      setDurationText(tmpPtr, displayFormat, totalHours == 1);
       break;
     
     case 4:
       totalMinutes = (int32_t)(duration.totalseconds() / 60L);
       tmpPtr += itoa(totalMinutes, tmpPtr);
-      copyString(tmpPtr, totalMinutes == 1 ? " Minute" : " Minutes");
+      setDurationText(tmpPtr, displayFormat, totalMinutes == 1);
       break;
     
     case 5:
       tmpPtr += itoa(duration.totalseconds(), tmpPtr);
-      copyString(tmpPtr, duration.totalseconds() == 1 ? " Second" : " Seconds");
+      setDurationText(tmpPtr, displayFormat, duration.totalseconds() == 1);
+      break;
+  
+    case 6:
+      tmpPtr += itoa(timeSpan.Years, tmpPtr);
+      tmpPtr = setDurationText(tmpPtr, 0, timeSpan.Years == 1);
+      tmpPtr += setStaticPeriodGap(tmpPtr);
+      tmpPtr += itoa(timeSpan.Months, tmpPtr);
+      tmpPtr = setDurationText(tmpPtr, 1, timeSpan.Months == 1);
+      tmpPtr += setStaticPeriodGap(tmpPtr);
+      tmpPtr += itoa(timeSpan.Days, tmpPtr);
+      tmpPtr = setDurationText(tmpPtr, 2, timeSpan.Days == 1);
+      tmpPtr += setStaticPeriodGap(tmpPtr);
+      tmpPtr += itoa(timeSpan.Hours, tmpPtr);
+      tmpPtr = setDurationText(tmpPtr, 3, timeSpan.Hours == 1);
+      tmpPtr += setStaticPeriodGap(tmpPtr);
+      tmpPtr += itoa(timeSpan.Minutes, tmpPtr);
+      tmpPtr = setDurationText(tmpPtr, 4, timeSpan.Minutes == 1);
+      tmpPtr += setStaticPeriodGap(tmpPtr);
+      tmpPtr += itoa(timeSpan.Seconds, tmpPtr);
+      tmpPtr = setDurationText(tmpPtr, 5, timeSpan.Seconds == 1);
+      tmpPtr += setStaticPeriodGap(tmpPtr);
+      break;
+
+    default:
+      copyString(tmpPtr, "Huh?");
       break;
   }
   
@@ -160,6 +186,38 @@ void showMarquee(DateTime curDateTime, TimeSpan duration, DateTimeSpan timeSpan)
   scrollWidth = w; // this is needed in order to calculate negative values because w is an unsigned int
   display.setCursor(xpos, 12);
   display.print(marquee);
+}
+
+char *setDurationText(char *value, byte durationType, bool isSingle)
+{
+  switch(durationType)
+  {
+    case 0:
+      return copyString(value, isSingle ? " Year" : " Years");
+    case 1:
+      return copyString(value, isSingle ? " Month" : " Months");
+    case 2:
+      return copyString(value, isSingle ? " Day" : " Days");
+    case 3:
+      return copyString(value, isSingle ? " Hour" : " Hours");
+    case 4:
+      return copyString(value, isSingle ? " Minute" : " Minutes");
+    case 5:
+      return copyString(value, isSingle ? " Second" : " Seconds");
+    default:
+      return value;
+  }
+}
+
+int setStaticPeriodGap(char *value)
+{
+  value[0] = '.';
+  value[1] = '.';
+  value[2] = '.';
+  value[3] = ' ';
+  value[4] = 0x00;
+  
+  return 4;
 }
 
 void showCurrentTime(DateTime curDateTime, TimeSpan duration)
@@ -233,7 +291,7 @@ void checkButtonPress()
       if(buttonState == HIGH)
       {
         displayFormat++;
-        if(displayFormat > 5)
+        if(displayFormat > MAX_DISPLAY_LEVEL)
         {
           displayFormat = 0;
         }
