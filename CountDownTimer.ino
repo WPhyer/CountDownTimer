@@ -27,7 +27,7 @@
 #define TIME_FORMAT_NULL_POS 23
 #define DATE_FORMAT_NULL_POS 11
 #define MARQUEE_MAX_LENGTH  100
-#define MAX_DISPLAY_LEVEL     6
+#define MAX_DISPLAY_LEVEL     7
 
 volatile int xpos = SCREEN_WIDTH - 1;
 volatile bool isInterrupted = false;
@@ -37,6 +37,7 @@ const DateTime TargetDateTime = DateTime(2030, 10, 25, 17, 0, 0); // 25-Oct-2030
 const uint8_t daysInMonth[] PROGMEM = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 static char marquee[MARQUEE_MAX_LENGTH];
 
+bool scroll           = 1;
 byte displayFormat    = 0;
 int buttonState       = LOW;
 int lastButtonState   = LOW;
@@ -91,7 +92,7 @@ void loop() {
 
 void marquee_ISR()
 {
-  if(!isInterrupted)
+  if(!isInterrupted && scroll)
   {
     isInterrupted = true;
     if(xpos > -scrollWidth)
@@ -121,89 +122,126 @@ void showMarquee(TimeSpan duration, DateTimeSpan timeSpan)
   switch(displayFormat)
   {
     case 0:
-      tmpPtr += itoa(timeSpan.Years, tmpPtr);
-      setDurationText(tmpPtr, displayFormat, timeSpan.Years == 1);
+      scroll = true;
+      setDurationText(tmpPtr, timeSpan.Years, displayFormat);
       break;
   
     case 1:
       months = (timeSpan.Years * 12) + timeSpan.Months;
-      tmpPtr += itoa(months, tmpPtr);
-      setDurationText(tmpPtr, displayFormat, months == 1);
+      setDurationText(tmpPtr, months, displayFormat);
       break;
 
     case 2:
-      tmpPtr += itoa(duration.days(), tmpPtr);
-      setDurationText(tmpPtr, displayFormat, duration.days() == 1);
+      setDurationText(tmpPtr, duration.days(), displayFormat);
       break;
     
     case 3:
       totalHours = (int32_t)((duration.totalseconds() / 60L) / 60L);
-      tmpPtr += itoa(totalHours, tmpPtr);
-      setDurationText(tmpPtr, displayFormat, totalHours == 1);
+      setDurationText(tmpPtr, totalHours, displayFormat);
       break;
     
     case 4:
       totalMinutes = (int32_t)(duration.totalseconds() / 60L);
-      tmpPtr += itoa(totalMinutes, tmpPtr);
-      setDurationText(tmpPtr, displayFormat, totalMinutes == 1);
+      setDurationText(tmpPtr, totalMinutes, displayFormat);
       break;
     
     case 5:
-      tmpPtr += itoa(duration.totalseconds(), tmpPtr);
-      setDurationText(tmpPtr, displayFormat, duration.totalseconds() == 1);
+      setDurationText(tmpPtr, duration.totalseconds(), displayFormat);
       break;
   
     case 6:
-      tmpPtr += itoa(timeSpan.Years, tmpPtr);
-      tmpPtr = setDurationText(tmpPtr, 0, timeSpan.Years == 1);
-      tmpPtr += setStaticPeriodGap(tmpPtr);
-      tmpPtr += itoa(timeSpan.Months, tmpPtr);
-      tmpPtr = setDurationText(tmpPtr, 1, timeSpan.Months == 1);
-      tmpPtr += setStaticPeriodGap(tmpPtr);
-      tmpPtr += itoa(timeSpan.Days, tmpPtr);
-      tmpPtr = setDurationText(tmpPtr, 2, timeSpan.Days == 1);
-      tmpPtr += setStaticPeriodGap(tmpPtr);
-      tmpPtr += itoa(timeSpan.Hours, tmpPtr);
-      tmpPtr = setDurationText(tmpPtr, 3, timeSpan.Hours == 1);
-      tmpPtr += setStaticPeriodGap(tmpPtr);
-      tmpPtr += itoa(timeSpan.Minutes, tmpPtr);
-      tmpPtr = setDurationText(tmpPtr, 4, timeSpan.Minutes == 1);
-      tmpPtr += setStaticPeriodGap(tmpPtr);
-      tmpPtr += itoa(timeSpan.Seconds, tmpPtr);
-      tmpPtr = setDurationText(tmpPtr, 5, timeSpan.Seconds == 1);
+      if(timeSpan.Years > 0)
+      {
+        tmpPtr = setDurationText(tmpPtr, timeSpan.Years, 0);
+        tmpPtr += setStaticPeriodGap(tmpPtr);
+      }
+      if(timeSpan.Months > 0)
+      {
+        tmpPtr = setDurationText(tmpPtr, timeSpan.Months, 1);
+        tmpPtr += setStaticPeriodGap(tmpPtr);
+      }
+      if(timeSpan.Days > 0)
+      {
+        tmpPtr = setDurationText(tmpPtr, timeSpan.Days, 2);
+        tmpPtr += setStaticPeriodGap(tmpPtr);
+      }
+      if(timeSpan.Hours > 0)
+      {
+        tmpPtr = setDurationText(tmpPtr, timeSpan.Hours, 3);
+        tmpPtr += setStaticPeriodGap(tmpPtr);
+      }
+      if(timeSpan.Minutes > 0)
+      {
+        tmpPtr = setDurationText(tmpPtr, timeSpan.Minutes, 4);
+        tmpPtr += setStaticPeriodGap(tmpPtr);
+      }
+      tmpPtr = setDurationText(tmpPtr, timeSpan.Seconds, 5);
       tmpPtr += setStaticPeriodGap(tmpPtr);
       break;
 
+    case 7:
+      scroll = false;
+      tmpPtr += itoax(timeSpan.Years, tmpPtr, true);
+      tmpPtr += setStaticColon(tmpPtr);
+      tmpPtr += itoax(timeSpan.Months, tmpPtr, true);
+      tmpPtr += setStaticColon(tmpPtr);
+      tmpPtr += itoax(timeSpan.Days, tmpPtr, true);
+      tmpPtr += setStaticColon(tmpPtr);
+      tmpPtr += itoax(timeSpan.Hours, tmpPtr, true);
+      tmpPtr += setStaticColon(tmpPtr);
+      tmpPtr += itoax(timeSpan.Minutes, tmpPtr, true);
+      tmpPtr += setStaticColon(tmpPtr);
+      tmpPtr += itoax(timeSpan.Seconds, tmpPtr, true);
+      break;
+      
     default:
       copyString(tmpPtr, "Huh?");
       break;
   }
   
-  display.setFont(&FreeSans9pt7b);
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.getTextBounds(marquee, 0, 15, &x1, &y1, &w, &h);
-  scrollWidth = w; // this is needed in order to calculate negative values because w is an unsigned int
-  display.setCursor(xpos, 12);
+  if(scroll)
+  {
+    display.setFont(&FreeSans9pt7b);
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.getTextBounds(marquee, 0, 15, &x1, &y1, &w, &h);
+    scrollWidth = w; // this is needed in order to calculate negative values because w is an unsigned int
+    display.setCursor(xpos, 12);
+  }
+  else
+  {
+    display.fillRect(0, 0, SCREEN_WIDTH, 16, SSD1306_WHITE);
+    display.setFont();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+    display.getTextBounds(marquee, 0, 15, &x1, &y1, &w, &h);
+    display.setCursor((SCREEN_WIDTH - w) / 2, 4);
+  }
   display.print(marquee);
 }
 
-char *setDurationText(char *value, byte durationType, bool isSingle)
+char *setDurationText(char *tmpPtr, int32_t value, byte durationType)
 {
+   bool isSingle;
+  
+  isSingle = value == 1;
+
+  tmpPtr += itoax(value, tmpPtr, false);
+  
   switch(durationType)
   {
     case 0:
-      return copyString(value, isSingle ? " Year" : " Years");
+      return copyString(tmpPtr, isSingle ? " Year" : " Years");
     case 1:
-      return copyString(value, isSingle ? " Month" : " Months");
+      return copyString(tmpPtr, isSingle ? " Month" : " Months");
     case 2:
-      return copyString(value, isSingle ? " Day" : " Days");
+      return copyString(tmpPtr, isSingle ? " Day" : " Days");
     case 3:
-      return copyString(value, isSingle ? " Hour" : " Hours");
+      return copyString(tmpPtr, isSingle ? " Hour" : " Hours");
     case 4:
-      return copyString(value, isSingle ? " Minute" : " Minutes");
+      return copyString(tmpPtr, isSingle ? " Minute" : " Minutes");
     case 5:
-      return copyString(value, isSingle ? " Second" : " Seconds");
+      return copyString(tmpPtr, isSingle ? " Second" : " Seconds");
     default:
       return value;
   }
@@ -220,11 +258,20 @@ int setStaticPeriodGap(char *value)
   return 4;
 }
 
+int setStaticColon(char *value)
+{
+  value[0] = ':';
+  value[1] = 0x00;
+
+  return 1;
+}
+
 void showCurrentTime(DateTime curDateTime, TimeSpan duration)
 {
   char *dateTime;
   display.setFont();
   display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
   
   dateTime = getDateFormatted(curDateTime);
   display.setCursor(63, 17);
@@ -312,8 +359,16 @@ char *copyString(char *destination, const char *source)
   return &destination[0];
 }
 
-int itoa(int32_t number, char *str)
+int itoax(int32_t number, char *str, bool leadingZero)
 {
+  if(number < 10)
+  {
+    str[0] = leadingZero ? '0' : number + '0';
+    str[1] = leadingZero ? number + '0' : 0x00;
+    str[2] = 0x00;
+    return leadingZero ? 2 : 1;
+  }
+  
   int index = 0;
   byte count = 0;
   while(number != 0)
@@ -329,7 +384,10 @@ int itoa(int32_t number, char *str)
     }
   }
   str[index] = 0x00;
-  reverse(str, index);
+  if(index > 1)
+  {
+    reverse(str, index);
+  }
   return index;
 }
 
