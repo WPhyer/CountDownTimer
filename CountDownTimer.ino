@@ -34,7 +34,7 @@ volatile bool isInterrupted = false;
 volatile int scrollWidth;
 
 const DateTime TargetDateTime = DateTime(2030, 10, 25, 17, 0, 0); // 25-Oct-2030 5:00:00PM
-const uint8_t daysInMonth[] PROGMEM = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+const uint8_t daysInMonth[] PROGMEM = {31, -1, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 static char marquee[MARQUEE_MAX_LENGTH];
 
 bool scroll           = 1;
@@ -45,12 +45,19 @@ long lastDebounceTime = 0;
 
 struct DateTimeSpan
 {
-  byte Years;
-  byte Months;
-  byte Days;
-  byte Hours;
-  byte Minutes;
-  byte Seconds;
+  int8_t Years;
+  int8_t Months;
+  int8_t Days;
+  int8_t Hours;
+  int8_t Minutes;
+  int8_t Seconds;
+
+  int32_t TotalYears;
+  int32_t TotalMonths;
+  int32_t TotalDays;
+  int32_t TotalHours;
+  int32_t TotalMinutes;
+  int32_t TotalSeconds;
 };
 
 RTC_DS3231 Clock;
@@ -81,11 +88,10 @@ void loop() {
   display.setTextWrap(false);
   
   DateTime curDateTime = Clock.now();
-  TimeSpan duration = TimeSpan(TargetDateTime - curDateTime);
-  DateTimeSpan timeSpan = CompareDates(curDateTime, TargetDateTime, duration);
+  DateTimeSpan timeDateSpan = getAllTimes(curDateTime, TargetDateTime);
 
-  showMarquee(duration, timeSpan);
-  showCurrentTime(curDateTime, duration);
+  showMarquee(timeDateSpan);
+  showCurrentTime(curDateTime);
   
   display.display();
 }
@@ -107,7 +113,7 @@ void marquee_ISR()
   }
 }
 
-void showMarquee(TimeSpan duration, DateTimeSpan timeSpan)
+void showMarquee(DateTimeSpan dateTimeSpan)
 {
   int x1;
   int y1;
@@ -123,75 +129,72 @@ void showMarquee(TimeSpan duration, DateTimeSpan timeSpan)
   {
     case 0:
       scroll = true;
-      setDurationText(tmpPtr, timeSpan.Years, displayFormat);
+      setDurationText(tmpPtr, dateTimeSpan.Years, displayFormat);
       break;
   
     case 1:
-      months = (timeSpan.Years * 12) + timeSpan.Months;
-      setDurationText(tmpPtr, months, displayFormat);
+      setDurationText(tmpPtr, dateTimeSpan.TotalMonths, displayFormat);
       break;
 
     case 2:
-      setDurationText(tmpPtr, duration.days(), displayFormat);
+      setDurationText(tmpPtr, dateTimeSpan.TotalDays, displayFormat);
       break;
     
     case 3:
-      totalHours = (int32_t)((duration.totalseconds() / 60L) / 60L);
-      setDurationText(tmpPtr, totalHours, displayFormat);
+      setDurationText(tmpPtr, dateTimeSpan.TotalHours, displayFormat);
       break;
     
     case 4:
-      totalMinutes = (int32_t)(duration.totalseconds() / 60L);
-      setDurationText(tmpPtr, totalMinutes, displayFormat);
+      setDurationText(tmpPtr, dateTimeSpan.TotalMinutes, displayFormat);
       break;
     
     case 5:
-      setDurationText(tmpPtr, duration.totalseconds(), displayFormat);
+      setDurationText(tmpPtr, dateTimeSpan.TotalSeconds, displayFormat);
       break;
   
     case 6:
-      if(timeSpan.Years > 0)
+      if(dateTimeSpan.Years > 0)
       {
-        tmpPtr = setDurationText(tmpPtr, timeSpan.Years, 0);
+        tmpPtr = setDurationText(tmpPtr, dateTimeSpan.Years, 0);
         tmpPtr += setStaticPeriodGap(tmpPtr);
       }
-      if(timeSpan.Months > 0)
+      if(dateTimeSpan.Months > 0)
       {
-        tmpPtr = setDurationText(tmpPtr, timeSpan.Months, 1);
+        tmpPtr = setDurationText(tmpPtr, dateTimeSpan.Months, 1);
         tmpPtr += setStaticPeriodGap(tmpPtr);
       }
-      if(timeSpan.Days > 0)
+      if(dateTimeSpan.Days > 0)
       {
-        tmpPtr = setDurationText(tmpPtr, timeSpan.Days, 2);
+        tmpPtr = setDurationText(tmpPtr, dateTimeSpan.Days, 2);
         tmpPtr += setStaticPeriodGap(tmpPtr);
       }
-      if(timeSpan.Hours > 0)
+      if(dateTimeSpan.Hours > 0)
       {
-        tmpPtr = setDurationText(tmpPtr, timeSpan.Hours, 3);
+        tmpPtr = setDurationText(tmpPtr, dateTimeSpan.Hours, 3);
         tmpPtr += setStaticPeriodGap(tmpPtr);
       }
-      if(timeSpan.Minutes > 0)
+      if(dateTimeSpan.Minutes > 0)
       {
-        tmpPtr = setDurationText(tmpPtr, timeSpan.Minutes, 4);
+        tmpPtr = setDurationText(tmpPtr, dateTimeSpan.Minutes, 4);
         tmpPtr += setStaticPeriodGap(tmpPtr);
       }
-      tmpPtr = setDurationText(tmpPtr, timeSpan.Seconds, 5);
+      tmpPtr = setDurationText(tmpPtr, dateTimeSpan.Seconds, 5);
       tmpPtr += setStaticPeriodGap(tmpPtr);
       break;
 
     case 7:
       scroll = false;
-      tmpPtr += itoax(timeSpan.Years, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Years, tmpPtr, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(timeSpan.Months, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Months, tmpPtr, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(timeSpan.Days, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Days, tmpPtr, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(timeSpan.Hours, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Hours, tmpPtr, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(timeSpan.Minutes, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Minutes, tmpPtr, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(timeSpan.Seconds, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Seconds, tmpPtr, true);
       break;
       
     default:
@@ -266,7 +269,7 @@ int setStaticColon(char *value)
   return 1;
 }
 
-void showCurrentTime(DateTime curDateTime, TimeSpan duration)
+void showCurrentTime(DateTime curDateTime)
 {
   char *dateTime;
   display.setFont();
@@ -303,24 +306,101 @@ char *getDateFormatted(DateTime dateTime)
   return dateFormat;
 }
 
-DateTimeSpan CompareDates(DateTime date1, DateTime date2, TimeSpan curTimeSpan)
+DateTimeSpan getAllTimes(DateTime fromDate, DateTime toDate)
 {
-  DateTimeSpan span;
+  DateTimeSpan dateTimeSpan;
+  TimeSpan timeSpan = TimeSpan(toDate - fromDate);
 
-  span.Years = (date2.year() - date1.year()) - (date1.month() > date2.month() ? 1 : 0);
-  span.Months = (date2.month() - date1.month()) - (date1.day() > date2.day() ? 1 : 0);
-  span.Days = date2.day() >= date1.day()
-    ? (date2.day() - date1.day())
-    : (pgm_read_byte(daysInMonth + date1.month() - 1) - date1.day()) + date2.day();
-  if((date2.year() % 4 == 0) && date1.month() == 2)
+  int8_t years = 0;
+  int8_t months = 0;
+  int8_t days = 0;
+  int8_t hours = 0;
+  int8_t minutes = 0;
+  int8_t seconds = 0 ;
+
+  byte minuteIncrement = 0;
+  byte hourIncrement = 0;
+  bool addDay = false;
+
+  if(fromDate.second() > toDate.second())
   {
-    span.Days++;
+    seconds = 60 - (fromDate.second() - toDate.second());
+    minuteIncrement = 1;
   }
-  span.Hours = curTimeSpan.hours();
-  span.Minutes = curTimeSpan.minutes();
-  span.Seconds = curTimeSpan.seconds();
+  else
+  {
+    seconds = toDate.second() - fromDate.second();
+  }
+
+  if(fromDate.minute() + minuteIncrement > toDate.minute())
+  {
+    minutes = 60 - ((fromDate.minute() + minuteIncrement) - toDate.minute());
+    hourIncrement = 1;
+  }
+  else
+  {
+    minutes = toDate.minute() - fromDate.minute();
+  }
+
+  if(fromDate.hour() + hourIncrement > toDate.hour())
+  {
+    hours = 24 - ((fromDate.hour() + hourIncrement) - toDate.hour());
+    addDay = true;
+  }
+  else
+  {
+    hours = toDate.hour() - fromDate.hour() - hourIncrement;
+  }
+
+  int8_t newCurrentDay = fromDate.day();
+  int8_t newCurrentMonth = fromDate.month();
+  int8_t newCurrentYear = fromDate.year();
+
+  if(addDay)
+  {
+    bool monthOverflow = (fromDate.day() + 1) > getDaysInMonth(fromDate.month(), fromDate.year());
+    newCurrentDay = monthOverflow ? 1 : fromDate.day() + 1;
+    newCurrentMonth = monthOverflow ? fromDate.month() + 1 : fromDate.month();
+    if(newCurrentMonth > 12)
+    {
+      newCurrentMonth = 1;
+    }
+    newCurrentYear = fromDate.month() == 12 && monthOverflow ? fromDate.year() + 1 : fromDate.year();
+  }
+
+  years = toDate.year() - newCurrentYear;
+  months = toDate.month() - newCurrentMonth;
+  days = toDate.day() - newCurrentDay;
+
+  bool dayOverflow = newCurrentDay > toDate.day();
+  bool dateOverflow = (newCurrentMonth == toDate.month() && newCurrentDay > toDate.day()) || newCurrentMonth > toDate.month();
+
+  if(dayOverflow)
+  {
+    days = getDaysInMonth(fromDate.month(), fromDate.year()) - (newCurrentDay - toDate.day());
+  }
+
+  if(dateOverflow)
+  {
+    years = years > 0 ? years - 1 : years;
+    months = 12 - (newCurrentMonth - toDate.month()) - (dayOverflow ? 1 : 0);
+  }
+
+  dateTimeSpan.Years = years;
+  dateTimeSpan.Months = months;
+  dateTimeSpan.Days = days;
+  dateTimeSpan.Hours = hours;
+  dateTimeSpan.Minutes = minutes;
+  dateTimeSpan.Seconds = seconds;
   
-  return span;
+  dateTimeSpan.TotalSeconds = timeSpan.totalseconds();
+  dateTimeSpan.TotalMinutes = dateTimeSpan.TotalSeconds / 60;
+  dateTimeSpan.TotalHours = dateTimeSpan.TotalSeconds / 3600;
+  dateTimeSpan.TotalDays = timeSpan.days();
+  dateTimeSpan.TotalMonths = (years * 12) + months;
+  dateTimeSpan.TotalYears = years;
+
+  return dateTimeSpan;
 }
 
 void checkButtonPress()
@@ -346,6 +426,21 @@ void checkButtonPress()
     }
   }
   lastButtonState = reading;
+}
+
+bool isLeapYear(int8_t year)
+{
+  return (((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0)) ? true : false;
+}
+
+int8_t getDaysInMonth(int8_t month, int8_t year)
+{
+  int8_t days = pgm_read_byte(daysInMonth + (month - 1));
+  return (days == -1)
+    ? isLeapYear(year)
+      ? 29
+      : 28
+    : days;
 }
 
 char *copyString(char *destination, const char *source)
