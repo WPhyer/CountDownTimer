@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Fonts/FreeSans9pt7b.h>
+#include "MultiFunctionButton.h"
 
 #define TIMER_INTERRUPT_DEBUG     0
 #define _TIMERINTERRUPT_LOGLEVEL_ 0
@@ -20,6 +21,7 @@
 #define OLED_RESET            4 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS     0x3C // See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 #define PUSH_BUTTON           2
+#define PUSH_BUTTON_ADJUST    4
 #define DEBOUNCE_DELAY_MS    50
 #define TIMER1_INTERVAL_MS   25
 #define TIMER1_DURATION_MS    0 //(10 * TIMER1_INTERVAL_MS) // Duration = 0 or not specified => run indefinitely
@@ -28,20 +30,33 @@
 #define DATE_FORMAT_NULL_POS 11
 #define MARQUEE_MAX_LENGTH  100
 #define MAX_DISPLAY_LEVEL     7
+#define MAX_YEAR           2050
+#define MIN_YEAR           2000
+
+#define ADJUST_IDLE   0
+#define ADJUST_HOUR   1
+#define ADJUST_MINUTE 2
+#define ADJUST_SECOND 3
+#define ADJUST_DAY    4
+#define ADJUST_MONTH  5
+#define ADJUST_YEAR   6
 
 volatile int xpos = SCREEN_WIDTH - 1;
 volatile bool isInterrupted = false;
 volatile int scrollWidth;
 
 const DateTime TargetDateTime = DateTime(2030, 10, 25, 17, 0, 0); // 25-Oct-2030 5:00:00PM
-const uint8_t daysInMonth[] PROGMEM = {31, -1, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+const int8_t daysInMonth[] PROGMEM = {31, -1, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 static char marquee[MARQUEE_MAX_LENGTH];
+const char *monthNames[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 bool scroll           = 1;
 byte displayFormat    = 0;
 int buttonState       = LOW;
 int lastButtonState   = LOW;
 long lastDebounceTime = 0;
+int adjustState       = ADJUST_IDLE;
+int adjustTime[]      = {2000, 1, 1, 0, 0, 0};
 
 struct DateTimeSpan
 {
@@ -62,6 +77,7 @@ struct DateTimeSpan
 
 RTC_DS3231 Clock;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+MultiFunctionButton buttonAdjust;
 
 void setup() {
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -79,21 +95,30 @@ void setup() {
 
   // uncomment to set time
   //Clock.adjust(DateTime(2021, 4, 25, 17, 03, 50));
+
+  buttonAdjust.configure(4, PULL_DOWN, onPressAdjust, NULL, onHoldAdjust);
+  buttonAdjust.debounce = DEBOUNCE_DELAY_MS;
+  buttonAdjust.longHoldDelay = 750;
 }
 
 void loop() {
-  checkButtonPress();
+  buttonAdjust.check();
   
-  display.clearDisplay();
-  display.setTextWrap(false);
+  if(adjustState == ADJUST_IDLE)
+  {
+    checkButtonPress();
+    
+    display.clearDisplay();
+    display.setTextWrap(false);
+    
+    DateTime curDateTime = Clock.now();
+    DateTimeSpan timeDateSpan = getAllTimes(curDateTime, TargetDateTime);
   
-  DateTime curDateTime = Clock.now();
-  DateTimeSpan timeDateSpan = getAllTimes(curDateTime, TargetDateTime);
-
-  showMarquee(timeDateSpan);
-  showCurrentTime(curDateTime);
-  
-  display.display();
+    showMarquee(timeDateSpan);
+    showCurrentTime(curDateTime);
+    
+    display.display();
+  }
 }
 
 void marquee_ISR()
@@ -184,17 +209,17 @@ void showMarquee(DateTimeSpan dateTimeSpan)
 
     case 7:
       scroll = false;
-      tmpPtr += itoax(dateTimeSpan.Years, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Years, tmpPtr, true, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(dateTimeSpan.Months, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Months, tmpPtr, true, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(dateTimeSpan.Days, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Days, tmpPtr, true, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(dateTimeSpan.Hours, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Hours, tmpPtr, true, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(dateTimeSpan.Minutes, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Minutes, tmpPtr, true, true);
       tmpPtr += setStaticColon(tmpPtr);
-      tmpPtr += itoax(dateTimeSpan.Seconds, tmpPtr, true);
+      tmpPtr += itoax(dateTimeSpan.Seconds, tmpPtr, true, true);
       break;
       
     default:
@@ -229,7 +254,7 @@ char *setDurationText(char *tmpPtr, int32_t value, byte durationType)
   
   isSingle = value == 1;
 
-  tmpPtr += itoax(value, tmpPtr, false);
+  tmpPtr += itoax(value, tmpPtr, false, true);
   
   switch(durationType)
   {
@@ -246,7 +271,7 @@ char *setDurationText(char *tmpPtr, int32_t value, byte durationType)
     case 5:
       return copyString(tmpPtr, isSingle ? " Second" : " Seconds");
     default:
-      return value;
+      return tmpPtr;
   }
 }
 
@@ -294,6 +319,73 @@ void showCurrentTime(DateTime curDateTime)
   display.print("Today:");
   display.setCursor(18, 59);
   display.print("End:");
+}
+
+void showUpdateTime(bool resetCursor)
+{
+  char tmpValue[5] = {0x00, 0x00, 0x00, 0x00, 0x00};
+  int x, y;
+  DateTime updateTime;
+  
+  if(resetCursor)
+  {
+      updateTime = DateTime(
+        adjustTime[0],
+        adjustTime[1],
+        adjustTime[2],
+        adjustTime[3],
+        adjustTime[4],
+        adjustTime[5]);
+
+      display.fillRect(0, 16, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+      showCurrentTime(updateTime);
+      return;
+  }
+  
+  switch(adjustState)
+  {
+    case ADJUST_HOUR:
+      itoax(adjustTime[3], tmpValue, true, false);
+      x = 63; y = 17;
+      break;
+   
+    case ADJUST_MINUTE:
+      itoax(adjustTime[4], tmpValue, true, false);
+      x = 81; y = 17;
+      break;
+   
+    case ADJUST_SECOND:
+      itoax(adjustTime[5], tmpValue, true, false);
+      x = 99; y = 17;
+      break;
+   
+    case ADJUST_MONTH:
+      copyString(tmpValue, monthNames[adjustTime[1] - 1]);
+      x = 81; y = 25;
+      break;
+   
+    case ADJUST_DAY:
+      itoax(adjustTime[2], tmpValue, true, false);
+      x = 63; y = 25;
+      break;
+   
+    case ADJUST_YEAR:
+      itoax(adjustTime[0], tmpValue, true, false);
+      x = 105; y = 25;
+      break;
+  }
+
+  display.setFont();
+  display.setTextSize(1);
+  if(adjustState == ADJUST_HOUR)
+  {
+    display.fillRect(117, 17, 12, 8, SSD1306_BLACK);
+  }
+  display.fillRect(x - 1, y - 1, adjustState == ADJUST_MONTH ? 19 : adjustState == ADJUST_YEAR ? 25 : 13, 9, SSD1306_WHITE);
+  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+  display.setCursor(x, y);
+  display.print(tmpValue);
+  display.display();
 }
 
 char *getDateFormatted(DateTime dateTime)
@@ -454,7 +546,7 @@ char *copyString(char *destination, const char *source)
   return &destination[0];
 }
 
-int itoax(int32_t number, char *str, bool leadingZero)
+int itoax(int32_t number, char *str, bool leadingZero, bool hasComma)
 {
   if(number < 10)
   {
@@ -471,11 +563,14 @@ int itoax(int32_t number, char *str, bool leadingZero)
     int remainder = number % 10;
     str[index++] = remainder + '0';
     number = (int32_t)(number / 10L);
-    count++;
-    if(count % 3 == 0 && number != 0)
+    if(hasComma)
     {
-      str[index++] = ',';
-      count = 0;
+      count++;
+      if(count % 3 == 0 && number != 0)
+      {
+        str[index++] = ',';
+        count = 0;
+      }
     }
   }
   str[index] = 0x00;
@@ -498,5 +593,117 @@ void reverse(char str[], int len)
     str[stop] = tmp;
     start++;
     stop--;
+  }
+}
+
+void onPressAdjust(int pin)
+{
+  int monthDays;
+
+  if(adjustState == ADJUST_IDLE)
+  {
+    return;
+  }
+  
+  switch(adjustState)
+  {
+    case ADJUST_HOUR:
+      adjustTime[3] = adjustTime[3] == 23 ? 0 : adjustTime[3] + 1;
+      break;
+
+    case ADJUST_MINUTE:
+      adjustTime[4] = adjustTime[4] == 59 ? 0 : adjustTime[4] + 1;
+      break;
+
+    case ADJUST_SECOND:
+      adjustTime[5] = adjustTime[5] == 59 ? 0 : adjustTime[5] + 1;
+      break;
+
+    case ADJUST_MONTH:
+      adjustTime[1] = adjustTime[1] == 12 ? 1 : adjustTime[1] + 1;
+      monthDays = getDaysInMonth(adjustTime[1], adjustTime[0]);
+      if(adjustTime[2] > monthDays)
+      {
+        adjustTime[2] = monthDays;
+      }
+      break;
+    
+    case ADJUST_DAY:
+      adjustTime[2] = adjustTime[2] >= getDaysInMonth(adjustTime[1], adjustTime[0]) ? 1 : adjustTime[2] + 1;
+      break;
+
+    case ADJUST_YEAR:
+      adjustTime[0] = adjustTime[0] >= MAX_YEAR ? MIN_YEAR : adjustTime[0] + 1;
+      monthDays = getDaysInMonth(adjustTime[1], adjustTime[0]);
+      if(adjustTime[2] > monthDays)
+      {
+        adjustTime[2] = monthDays;
+      }
+      break;
+  }
+
+  showUpdateTime(false);
+}
+
+void onHoldAdjust(int pin)
+{
+  DateTime currentTime;
+
+  switch(adjustState)
+  {
+    case ADJUST_IDLE:
+      currentTime = Clock.now();
+      adjustTime[0] = currentTime.year();
+      adjustTime[1] = currentTime.month();
+      adjustTime[2] = currentTime.day();
+      adjustTime[3] = currentTime.hour();
+      adjustTime[4] = currentTime.minute();
+      adjustTime[5] = currentTime.second();
+      adjustState = ADJUST_HOUR;
+      showUpdateTime(true);
+      showUpdateTime(false);
+      break;
+  
+    case ADJUST_HOUR:
+      adjustState = ADJUST_MINUTE;
+      showUpdateTime(true);
+      showUpdateTime(false);
+      break;
+  
+    case ADJUST_MINUTE:
+      adjustState = ADJUST_SECOND;
+      showUpdateTime(true);
+      showUpdateTime(false);
+      break;
+  
+    case ADJUST_SECOND:
+      adjustState = ADJUST_MONTH;
+      showUpdateTime(true);
+      showUpdateTime(false);
+      break;
+  
+    case ADJUST_MONTH:
+      adjustState = ADJUST_DAY;
+      showUpdateTime(true);
+      showUpdateTime(false);
+      break;
+  
+    case ADJUST_DAY:
+      adjustState = ADJUST_YEAR;
+      showUpdateTime(true);
+      showUpdateTime(false);
+      break;
+  
+    case ADJUST_YEAR:
+      adjustState = ADJUST_IDLE;
+      Clock.adjust(DateTime(
+        adjustTime[0],
+        adjustTime[1],
+        adjustTime[2],
+        adjustTime[3],
+        adjustTime[4],
+        adjustTime[5]));
+      showUpdateTime(true);
+      break;
   }
 }
