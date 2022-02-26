@@ -403,94 +403,63 @@ DateTimeSpan getAllTimes(DateTime fromDate, DateTime toDate)
   DateTimeSpan dateTimeSpan;
   TimeSpan timeSpan = TimeSpan(toDate - fromDate);
 
-  int8_t years = 0;
-  int8_t months = 0;
-  int8_t days = 0;
-  int8_t hours = 0;
-  int8_t minutes = 0;
-  int8_t seconds = 0 ;
-
-  byte minuteIncrement = 0;
-  byte hourIncrement = 0;
-  bool addDay = false;
-
-  if(fromDate.second() > toDate.second())
+  int8_t curSecond = fromDate.second();
+  int8_t curMinute = fromDate.minute();
+  int8_t curHour = fromDate.hour();
+  int8_t curDay = fromDate.day();
+  int8_t curMonth = fromDate.month();
+  int8_t curYear = fromDate.year();
+  
+  int8_t endSecond = toDate.second();
+  int8_t endMinute = toDate.minute();
+  int8_t endHour = toDate.hour();
+  int8_t endDay = toDate.day();
+  int8_t endMonth = toDate.month();
+  int8_t endYear = toDate.year();
+  
+  if(endSecond < curSecond)
   {
-    seconds = 60 - (fromDate.second() - toDate.second());
-    minuteIncrement = 1;
-  }
-  else
-  {
-    seconds = toDate.second() - fromDate.second();
-  }
-
-  if(fromDate.minute() + minuteIncrement > toDate.minute())
-  {
-    minutes = 60 - ((fromDate.minute() + minuteIncrement) - toDate.minute());
-    hourIncrement = 1;
-  }
-  else
-  {
-    minutes = toDate.minute() - fromDate.minute();
+    endSecond += 60;
+    endMinute--;
   }
 
-  if(fromDate.hour() + hourIncrement > toDate.hour())
+  if(endMinute < curMinute)
   {
-    hours = 24 - ((fromDate.hour() + hourIncrement) - toDate.hour());
-    addDay = true;
-  }
-  else
-  {
-    hours = toDate.hour() - fromDate.hour() - hourIncrement;
+    endMinute += 60;
+    endHour--;
   }
 
-  int8_t newCurrentDay = fromDate.day();
-  int8_t newCurrentMonth = fromDate.month();
-  int8_t newCurrentYear = fromDate.year();
-
-  if(addDay)
+  if(endHour < curHour)
   {
-    bool monthOverflow = (fromDate.day() + 1) > getDaysInMonth(fromDate.month(), fromDate.year());
-    newCurrentDay = monthOverflow ? 1 : fromDate.day() + 1;
-    newCurrentMonth = monthOverflow ? fromDate.month() + 1 : fromDate.month();
-    if(newCurrentMonth > 12)
-    {
-      newCurrentMonth = 1;
-    }
-    newCurrentYear = fromDate.month() == 12 && monthOverflow ? fromDate.year() + 1 : fromDate.year();
+    endHour += 24;
+    endDay--;
   }
 
-  years = toDate.year() - newCurrentYear;
-  months = toDate.month() - newCurrentMonth;
-  days = toDate.day() - newCurrentDay;
-
-  bool dayOverflow = newCurrentDay > toDate.day();
-  bool dateOverflow = (newCurrentMonth == toDate.month() && newCurrentDay > toDate.day()) || newCurrentMonth > toDate.month();
-
-  if(dayOverflow)
+  if(endDay < curDay)
   {
-    days = getDaysInMonth(fromDate.month(), fromDate.year()) - (newCurrentDay - toDate.day());
+    endDay += getDaysInMonth(endMonth != 1 ? endMonth - 1 : 12, endYear);
+    endMonth--;
   }
 
-  if(dateOverflow)
+  if(endMonth < curMonth)
   {
-    years = years > 0 ? years - 1 : years;
-    months = 12 - (newCurrentMonth - toDate.month()) - (dayOverflow ? 1 : 0);
+    endMonth += 12;
+    endYear--;
   }
 
-  dateTimeSpan.Years = years;
-  dateTimeSpan.Months = months;
-  dateTimeSpan.Days = days;
-  dateTimeSpan.Hours = hours;
-  dateTimeSpan.Minutes = minutes;
-  dateTimeSpan.Seconds = seconds;
+  dateTimeSpan.Seconds = endSecond - curSecond;
+  dateTimeSpan.Minutes = endMinute - curMinute;
+  dateTimeSpan.Hours = endHour - curHour;
+  dateTimeSpan.Days = endDay - curDay;
+  dateTimeSpan.Months = endMonth - curMonth;
+  dateTimeSpan.Years = endYear - curYear;
   
   dateTimeSpan.TotalSeconds = timeSpan.totalseconds();
   dateTimeSpan.TotalMinutes = dateTimeSpan.TotalSeconds / 60;
   dateTimeSpan.TotalHours = dateTimeSpan.TotalSeconds / 3600;
   dateTimeSpan.TotalDays = timeSpan.days();
-  dateTimeSpan.TotalMonths = (years * 12) + months;
-  dateTimeSpan.TotalYears = years;
+  dateTimeSpan.TotalMonths = (dateTimeSpan.Years * 12) + dateTimeSpan.Months;
+  dateTimeSpan.TotalYears = dateTimeSpan.Years;
 
   return dateTimeSpan;
 }
